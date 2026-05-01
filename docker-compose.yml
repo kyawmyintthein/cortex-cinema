@@ -1,0 +1,34 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: engagement-agent:local
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  e2e:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      app:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        health_response="$$(curl -fsS http://app:8000/healthz)"
+        echo "$$health_response"
+        echo "$$health_response" | grep '"status":"ok"'
+
+        engagement_response="$$(curl -fsS 'http://app:8000/v1/movies/550/engagement?userId=user_123&includeHook=true')"
+        echo "$$engagement_response"
+        echo "$$engagement_response" | grep '"movieId":550'
+        echo "$$engagement_response" | grep '"teaserQuestion"'
+        echo "$$engagement_response" | grep '"funFactAnswer"'
+        echo "$$engagement_response" | grep '"whyWatchNow"'

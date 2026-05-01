@@ -1,0 +1,53 @@
+[project]
+name = "engagement-agent"
+version = "0.1.0"
+description = "Skeleton backend for the Cortex Cinema engagement agent."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "langgraph>=0.2.0",
+  "pydantic>=2.8.0",
+  "pydantic-settings>=2.4.0",
+  "pyyaml>=6.0.2",
+  "sqlalchemy>=2.0.0",
+  "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27.0",
+  "pytest>=8.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+  "app",
+  "app.api",
+  "app.api.routes",
+  "app.api.schemas",
+  "app.agents",
+  "app.agents.nodes",
+  "app.analytics",
+  "app.cache",
+  "app.composition",
+  "app.core",
+  "app.llm",
+  "app.services",
+  "app.services.tmdb",
+  "app.services.trends",
+  "app.services.trends.sources",
+  "app.services.user_profile",
+  "app.storage",
+  "app.storage.repositories",
+]
+
+[tool.setuptools.package-data]
+"app.llm.prompts" = ["*.txt"]
+
+[tool.uv]
+package = true

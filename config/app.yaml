@@ -1,0 +1,19 @@
+app:
+  name: engagement-agent
+  version: v1.0.0
+  environment: local
+
+features:
+  trend_enrichment_enabled: true
+  hook_generation_enabled: true
+
+cache:
+  movie_context_ttl_seconds: 86400
+  trend_context_ttl_seconds: 3600
+  candidate_content_ttl_seconds: 21600
+  final_response_ttl_seconds: 900
+
+llm:
+  model: gpt-5.4-mini
+  timeout_seconds: 8
+  max_retries: 1
