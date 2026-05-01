@@ -57,7 +57,61 @@ The mobile app already uses `TMDB` as the primary movie data source. This soluti
 
 For `v1.0.0`, the system should be agentic in architecture but not overly autonomous. It should use a single orchestrator with a small set of deterministic specialist agents instead of a free-form multi-agent swarm.
 
+## Recommended Platform
+
+### Agentic Platform
+
+Recommended platform for `v1.0.0`:
+
+- `Python`
+- `FastAPI` for the backend API layer
+- `LangGraph` for orchestrator and agent workflow control
+- `OpenAI API` for LLM-powered generation tools
+
+Why this platform is recommended:
+
+- `LangGraph` fits the bounded agentic workflow well because it supports explicit state, deterministic transitions, and narrow node responsibilities
+- `FastAPI` matches the repository backend defaults and is a strong fit for mobile-facing JSON APIs
+- `Python` keeps integration simple across orchestration, prompt handling, caching, and enrichment pipelines
+- `OpenAI API` works well for structured generation of teaser questions, reveal answers, and watch-intent copy
+
+### Why Not MCP for v1.0.0
+
+`MCP` is not recommended for the first implementation because:
+
+- there is one main app integration path
+- the tools are internal backend components, not broadly shared external tools yet
+- the MVP needs tight latency control and straightforward backend orchestration
+
+MCP can be reconsidered later if the system expands into:
+
+- multiple user-facing assistants
+- internal editorial AI tooling
+- reusable cross-agent tool ecosystems
+
+## Recommended Architecture Style
+
+The recommended architecture style for `v1.0.0` is:
+
+- `agentic orchestration layer`
+- `modular backend services`
+- `tool-based execution`
+- `LLM generation at the edges of orchestration`
+
+In practice, that means:
+
+- `Engagement API` is the backend gateway
+- the gateway performs request validation, cache lookup, and response mapping
+- `Orchestrator Agent` manages workflow state and routing
+- the `Context Layer` provides movie, user, and trend context
+- the `Generation Layer` calls the LLM through a shared gateway
+- the `Composition Layer` assembles, ranks, deduplicates, validates, and caches the final payload
+
+This is not a microservice-heavy design for v1.0.0. It is better implemented as a modular backend with clear internal boundaries rather than many independently deployed services.
+
 ## High-Level Architecture
+
+This high-level architecture is based on the reference diagram provided for the solution design and is intended to show the major system building blocks only. It should be read as a conceptual system map, not as an execution flow.
 
 ```mermaid
 flowchart LR
@@ -66,58 +120,391 @@ flowchart LR
     B["Engagement API (Backend Gateway)"]
     C["Orchestrator Agent (Brain)"]
 
-    D["Movie Context Tool"]
-    E["User Activity / Profile Service"]
-    F["Trend Agent"]
+    subgraph CONTEXT ["Context Layer"]
+        D["Movie Context Tool"]
+        E["User Activity / Profile Service"]
+        F["Trend Agent"]
+    end
 
-    G["Teaser Question Generator Tool (LLM)"]
-    H["Fun Fact Answer Generator Tool (LLM)"]
-    I["Why Watch Generator Tool (LLM)"]
+    subgraph GENERATION ["Generation Layer"]
+        G["Teaser Question Generator"]
+        H["Fun Fact Answer Generator"]
+        I["Why Watch Generator"]
+        I1["Hook Generator (Optional)"]
+        T["LLM Gateway"]
+    end
 
-    J["Response Composer"]
-    K["Cache"]
-    L["Analytics / Feedback"]
+    subgraph COMPOSITION ["Composition Layer"]
+        J["Response Composer"]
+        J1["Ranking & Personalization"]
+        J2["Repeat Avoidance"]
+        J3["Output Validation"]
+    end
+
+    K["Cache (Redis / In-Memory Store)"]
+    L["Metrics / Logging"]
+    M1["Analytics / Feedback"]
 
     A --> B
+    B --> K
     B --> C
 
-    C --> D
-    C --> E
-    C --> F
+    C --> CONTEXT
+    C --> GENERATION
+    C --> COMPOSITION
 
-    C --> G
-    C --> H
-    C --> I
+    GENERATION --> T
+    COMPOSITION --> K
 
-    C --> J
-    J --> K
-
-    B --> L
+    C -.-> L
+    COMPOSITION -.-> L
+    B -.-> M1
 
     D --> M["TMDB API"]
     E --> N["User DB / Events Store"]
     F --> O["Reddit / X / News APIs"]
 ```
 
+Reference-image alignment:
+
+- `Mobile App (iOS UI)` opens the movie page and requests engagement content
+- `Engagement API (Backend Gateway)` is the only mobile-facing integration point
+- `Orchestrator Agent (Brain)` plans tool usage and coordinates response generation
+- `Context Layer` groups `Movie Context Tool`, `User Activity / Profile Service`, and `Trend Agent`
+- `Generation Layer` groups the teaser, fun-fact-answer, why-watch, and optional hook generators behind the `LLM Gateway`
+- `Composition Layer` groups `Response Composer`, `Ranking & Personalization`, `Repeat Avoidance`, and `Output Validation`
+- `Cache (Redis / In-Memory Store)` stores recent responses for latency reduction
+- `Metrics / Logging` captures orchestration, generation, and composition observability
+- `Analytics / Feedback` collects events, ratings, and usage signals
+
+## Low-Level Architecture
+
+The low-level view below translates the reference image into concrete backend execution units that engineering can implement. It should be read as a runtime and processing flow.
+
+```mermaid
+flowchart TD
+    %% Entry
+    A["FastAPI Route: GET /v1/movies/{tmdbId}/engagement"]
+    A --> B["Request Validator"]
+    B --> C["Cache Lookup"]
+
+    %% Cache paths
+    C -->|hit| D["Response Mapper"]
+    C -->|miss| E["Orchestrator (LangGraph)"]
+
+    %% Orchestrator Layers
+    subgraph CONTEXT_LAYER ["Context Layer (Parallel)"]
+        F["Movie Context Node"]
+        G["User Profile Node"]
+        H["Trend Agent Node"]
+    end
+
+    subgraph GENERATION_LAYER ["Generation Layer (Parallel & Optional)"]
+        I["Teaser Generator"]
+        J["Fun Fact Generator"]
+        K["Why Watch Generator"]
+        L["Hook Generator (Optional)"]
+    end
+
+    subgraph COMPOSITION_LAYER ["Composition Layer"]
+        M["Response Composer"]
+        N["Ranking & Personalization"]
+        O["Repeat Avoidance"]
+        P["Output Validation"]
+    end
+
+    %% External Systems
+    Q["TMDB Client"]
+    R["User Profile Store"]
+    S["Trend Sources (Reddit/X/News)"]
+
+    %% LLM Gateway
+    T["LLM Gateway (Retry/Timeout/Prompt Mgmt)"]
+
+    %% Cache + Observability
+    U["Cache Write"]
+    V["Metrics / Logging"]
+
+    %% Flow
+    E --> CONTEXT_LAYER
+    F --> Q
+    G --> R
+    H --> S
+
+    CONTEXT_LAYER --> GENERATION_LAYER
+
+    I --> T
+    J --> T
+    K --> T
+    L --> T
+
+    GENERATION_LAYER --> COMPOSITION_LAYER
+
+    M --> N --> O --> P --> U
+    U --> D
+
+    %% Observability hooks
+    E --> V
+    T --> V
+    M --> V
+```
+
+## Implementation Architecture
+
+Suggested backend module layout:
+
+```text
+app/
+  api/
+    routes/
+      engagement.py
+    schemas/
+      engagement.py
+  agents/
+    orchestrator.py
+    state.py
+    nodes/
+      movie_context.py
+      user_profile.py
+      trend_agent.py
+      teaser_question.py
+      fun_fact_answer.py
+      why_watch.py
+      hook.py
+      response_composer.py
+  services/
+    tmdb/
+      client.py
+      mapper.py
+    user_profile/
+      service.py
+    trends/
+      service.py
+      sources/
+        reddit.py
+        x.py
+        news.py
+  llm/
+    gateway.py
+    prompts/
+      teaser_question.txt
+      fun_fact_answer.txt
+      why_watch.txt
+      hook.txt
+    client.py
+    schemas.py
+  cache/
+    service.py
+  analytics/
+    events.py
+    metrics.py
+  storage/
+    repositories/
+      reveal_history.py
+      feedback.py
+  composition/
+    ranking.py
+    repeat_avoidance.py
+    validation.py
+```
+
+Suggested runtime boundaries:
+
+- `API layer`: FastAPI request handling, auth, schema validation, cache lookup, response mapping
+- `orchestration layer`: LangGraph state graph and agent routing
+- `context layer`: TMDB, user profile, trend retrieval, reveal-history lookup
+- `generation layer`: shared LLM gateway, prompt execution, structured parsing
+- `composition layer`: response assembly, ranking, repeat avoidance, validation, cache write
+- `observability layer`: metrics, logs, and usage events
+
+## Execution Layers
+
+The implementation should follow the same layered structure used in the diagrams:
+
+1. `Gateway layer`
+   Handles request validation, cache lookup, response mapping, and mobile-safe response return.
+2. `Context layer`
+   Loads normalized movie context, user context, and optional trend context.
+3. `Generation layer`
+   Produces teaser question, fun-fact answer, why-watch copy, and optional hook through the shared LLM gateway.
+4. `Composition layer`
+   Combines outputs, applies ranking and personalization, avoids repeats, validates safety, and writes cache.
+5. `Observability layer`
+   Records orchestration, generation, composition, reveal, and feedback metrics.
+
+## Mobile App Interaction Design
+
+The mobile app should not interact with the agents directly. It should only interact with the backend gateway API.
+
+Recommended mobile interaction pattern:
+
+1. iOS movie detail page loads basic movie content as usual.
+2. The app calls the engagement endpoint in parallel with other detail-page requests.
+3. The app renders:
+   - `teaserQuestion` immediately
+   - hidden `funFactAnswer` behind tap-to-reveal
+   - visible `whyWatchNow`
+   - optional `hook` if present
+4. When the user taps reveal, the app expands the answer and emits a reveal event.
+5. When the user gives feedback, the app emits helpful or not-helpful events.
+
+Recommended mobile behavior:
+
+- render cached or skeleton state while loading
+- treat engagement as an enhancement, not a blocking dependency for the page
+- support stale-safe rendering if the engagement request fails
+- send reveal events only when the answer is actually opened
+
+## API Design
+
+### Endpoint
+
+```text
+GET /v1/movies/{tmdbId}/engagement
+```
+
+### Query Parameters
+
+- `userId`: required for personalized and repeat-aware behavior
+- `includeHook`: optional boolean
+- `clientPlatform`: optional string such as `ios`
+- `locale`: optional locale code for future localization
+
+Example:
+
+```text
+GET /v1/movies/550/engagement?userId=user_123&includeHook=true&clientPlatform=ios
+```
+
+### Response Shape
+
+```json
+{
+  "movieId": 550,
+  "engagement": {
+    "teaserQuestion": "Do you know why this film became such a big cultural talking point?",
+    "funFactAnswer": "It stood out for combining large-scale spectacle with a story that audiences kept discussing long after watching.",
+    "whyWatchNow": "You have been leaning into cerebral sci-fi lately, and this fits that mood.",
+    "hook": "A visually ambitious watch with strong discussion energy."
+  },
+  "metadata": {
+    "personalized": true,
+    "trendUsed": true,
+    "fallbackUsed": false,
+    "hookIncluded": true,
+    "factId": "fact_021",
+    "version": "v1.0.0"
+  }
+}
+```
+
+### Feedback and Reveal APIs
+
+Recommended follow-up endpoints:
+
+```text
+POST /v1/movies/{tmdbId}/engagement/reveal
+POST /v1/movies/{tmdbId}/engagement/feedback
+```
+
+Suggested reveal event body:
+
+```json
+{
+  "userId": "user_123",
+  "factId": "fact_021",
+  "revealedAt": "2026-05-01T10:30:00Z"
+}
+```
+
+Suggested feedback body:
+
+```json
+{
+  "userId": "user_123",
+  "factId": "fact_021",
+  "feedback": "helpful"
+}
+```
+
+### API Behavior Rules
+
+- `GET /engagement` should be safe to call repeatedly
+- reveal history should only be updated by the reveal endpoint, not by the initial fetch
+- feedback should be asynchronous and not block UI rendering
+- if `userId` is unavailable, the API should still return generic non-personalized engagement
+
+## Agent Workflow Design
+
+Recommended `LangGraph` node order for `v1.0.0`:
+
+1. `load_movie_context`
+2. `load_user_profile`
+3. `maybe_load_trend_context`
+4. `generate_teaser_question`
+5. `generate_fun_fact_answer`
+6. `generate_why_watch_now`
+7. `maybe_generate_hook`
+8. `compose_response`
+
+### LangGraph Diagram
+
+```mermaid
+flowchart TD
+    A["START"] --> B["load_movie_context"]
+    A --> C["load_user_profile"]
+
+    B --> D{"trend enabled?"}
+    C --> D
+
+    D -->|yes| E["maybe_load_trend_context"]
+    D -->|no| F["generate_teaser_question"]
+
+    E --> F["generate_teaser_question"]
+    E --> G["generate_fun_fact_answer"]
+    E --> H["generate_why_watch_now"]
+
+    F --> I{"include hook?"}
+    G --> I
+    H --> I
+
+    I -->|yes| J["maybe_generate_hook"]
+    I -->|no| K["compose_response"]
+
+    J --> K["compose_response"]
+    K --> L["END"]
+```
+
+This graph represents the orchestration logic inside `LangGraph`, not the full HTTP request lifecycle. Cache lookup, request validation, response mapping, and analytics remain outside the graph in the API and platform layers.
+
+Suggested execution notes:
+
+- cache hit returns from the gateway without entering the graph
+- `load_movie_context` and `load_user_profile` can run in parallel
+- `maybe_load_trend_context` can run only if enabled by feature flag or movie popularity rules
+- generator nodes can run in parallel once shared inputs are available
+- `compose_response` should remain the single exit path inside the graph
+- ranking, repeat avoidance, and validation should be treated as composition sub-steps
+
 ## Primary Request Flow
 
 1. The user opens a movie page in the `Mobile App (iOS UI)`.
 2. The app calls the `Engagement API (Backend Gateway)` with `tmdbId` and `userId`.
-3. The backend gateway forwards the request to the `Orchestrator Agent (Brain)`.
-4. The orchestrator calls `Movie Context Tool`, which retrieves normalized movie metadata from `TMDB API`.
-5. The orchestrator calls `User Activity / Profile Service`, which retrieves user taste signals from the `User DB / Events Store`.
-6. The user profile service also provides reveal history for previously seen teaser-question and fun-fact-answer pairs when available.
-7. The orchestrator optionally invokes `Trend Agent`, which gathers external momentum or buzz signals from `Reddit / X / News APIs`.
-8. The orchestrator sends the right context to the specialized generation tools.
-9. `Teaser Question Generator Tool (LLM)` generates the teaser question.
-10. `Fun Fact Answer Generator Tool (LLM)` generates the reveal answer.
-11. `Why Watch Generator Tool (LLM)` generates the personalized or fallback watch reason.
-12. The orchestrator may also request an optional hook when the client experience supports it.
-13. The orchestrator sends all outputs to the `Response Composer`.
-14. The response composer filters or rejects already-seen answer variants when user reveal history is available.
-15. The response composer validates, assembles, and stores the final response in `Cache`.
-16. The `Engagement API (Backend Gateway)` returns the composed response to the mobile client.
-17. Request, feedback, reveal-click, and downstream engagement events are sent to `Analytics / Feedback`.
+3. The gateway validates the request and checks cache.
+4. If a valid cached response exists, the gateway maps and returns it immediately.
+5. If cache misses, the gateway forwards the request to the `Orchestrator Agent (Brain)`.
+6. The orchestrator calls `Movie Context Tool`, which retrieves normalized movie metadata from `TMDB API`.
+7. The orchestrator calls `User Activity / Profile Service`, which retrieves user taste signals and reveal history from the `User DB / Events Store`.
+8. The orchestrator optionally invokes `Trend Agent`, which gathers external momentum or buzz signals from `Reddit / X / News APIs`.
+9. The orchestrator sends the prepared context into the `Generation Layer`.
+10. `Teaser Question Generator Tool (LLM)`, `Fun Fact Answer Generator Tool (LLM)`, and `Why Watch Generator Tool (LLM)` generate their outputs through the shared `LLM Gateway`.
+11. The orchestrator may also request an optional hook when the client experience supports it.
+12. The `Composition Layer` assembles the outputs in `Response Composer`.
+13. `Ranking & Personalization` orders or adjusts the response for the current user.
+14. `Repeat Avoidance` filters already-seen answer variants when alternatives are available.
+15. `Output Validation` applies structure and safety checks.
+16. The composed response is written to `Cache`, mapped to the API response shape, and returned to the mobile client.
+17. Orchestration, generation, reveal-click, feedback, and downstream engagement events are sent to `Metrics / Logging` and `Analytics / Feedback`.
 
 ## Agent Design
 
@@ -230,13 +617,35 @@ Responsibilities:
 Responsibilities:
 
 - combine generator outputs into the final response payload
-- validate structure, safety, and fallback rules
+- hand off to ranking, repeat-avoidance, and validation sub-steps
 - set metadata such as `personalized`, `trendUsed`, `fallbackUsed`, and `hookIncluded`
-- check generated fact identity against user reveal history when available
-- prefer unseen fact variants before returning the response
 - prepare the payload for caching and API return
 
-### 10. Trend Source Layer
+### 10. Ranking & Personalization
+
+Responsibilities:
+
+- adjust response ordering or emphasis for the current user
+- ensure `whyWatchNow` remains the main personalized component
+- prefer stronger variants when multiple candidate outputs exist
+
+### 11. Repeat Avoidance
+
+Responsibilities:
+
+- check generated fact identity against user reveal history when available
+- prefer unseen fact variants before returning the response
+- allow reuse only when novelty is exhausted
+
+### 12. Output Validation
+
+Responsibilities:
+
+- enforce final response shape
+- apply safety and fallback rules
+- reject malformed or low-confidence output before caching
+
+### 13. Trend Source Layer
 
 Responsibilities:
 
@@ -484,6 +893,183 @@ If validation fails:
 
 - retry once with a stricter repair prompt, or
 - return template fallback content
+
+### Caching Model
+
+Cache should be used as a speed and cost optimization layer, not as the only source of truth for what a user sees.
+
+In this system:
+
+- cache improves latency and reduces repeated generation work
+- reveal history protects novelty for each user
+- the composition layer combines both to select the best response
+
+The system should treat cache as a store of reusable context and candidate outputs, not as a single fixed fun-fact answer per movie.
+
+### Cache Layers
+
+#### 1. Movie Context Cache
+
+Cached data:
+
+- normalized TMDB movie details
+- cast
+- plot summary
+- genre and popularity context
+
+Suggested key:
+
+- `movieId`
+
+Use:
+
+- avoid repeated TMDB calls
+- shared across all users
+
+#### 2. Trend Context Cache
+
+Cached data:
+
+- summarized Reddit, X, and news trend signals
+- trend reasoning output
+- source freshness metadata
+
+Suggested key:
+
+- `movieId + trendWindow + sourcePolicyVersion`
+
+Use:
+
+- avoid repeated external fetch and summarization work
+- shared across users
+- expires faster than movie context
+
+#### 3. Candidate Content Cache
+
+Cached data:
+
+- multiple `teaserQuestion + funFactAnswer` candidate variants
+- optional hook candidates
+- generic `whyWatchNow` candidates
+
+Suggested key:
+
+- `movieId + contentVersion + trendSegment`
+
+Use:
+
+- reuse generation work
+- allow the system to rotate among multiple fact variants
+- support per-user novelty filtering
+
+Important rule:
+
+- do not cache only one final fact per movie
+- cache a pool of candidates per movie whenever possible
+
+#### 4. Final Response Cache
+
+Cached data:
+
+- short-lived selected response for a given user and movie
+
+Suggested key:
+
+- `userId + movieId + trendSegment + includeHook + noveltySegment + version`
+
+Use:
+
+- accelerate repeat page opens within a short time window
+- reduce repeated composition work
+
+This cache should be short-lived because the novelty state can change after the user reveals the answer.
+
+#### 5. Reveal History Store
+
+Stored data:
+
+- revealed `factId`s or answer fingerprints per user and movie
+
+Suggested key:
+
+- `userId + movieId`
+
+Use:
+
+- persistent novelty tracking
+- repeat avoidance across sessions
+
+This should be stored in persistent storage, not only in ephemeral cache.
+
+### Cache Selection Flow
+
+When the movie page opens:
+
+1. check `final response cache`
+2. if present and still valid, return it
+3. if not present, load:
+   - `movie context cache`
+   - `trend context cache`
+   - `candidate content cache`
+   - `reveal history store`
+4. select the best unseen candidate for this user
+5. if no unseen candidate exists:
+   - reuse the best safe candidate, or
+   - generate a new candidate if policy allows
+6. compose the final response
+7. write the final response to short-lived final-response cache
+8. update reveal history only after the user actually taps reveal
+
+### Candidate Pool Strategy
+
+For each movie, the system should try to keep multiple fact candidates available.
+
+Recommended starting point:
+
+- `3 to 10` fact candidates per movie
+
+Each candidate should include:
+
+- `factId`
+- `teaserQuestion`
+- `funFactAnswer`
+- `trendTags`
+- `confidence`
+- `sourceType`
+
+Selection logic should:
+
+- exclude already revealed `factId`s for this user
+- prefer higher-confidence candidates
+- prefer fresher trend-supported candidates when relevant
+- allow safe reuse only when novelty is exhausted
+
+### Suggested TTLs
+
+Reasonable starting TTLs:
+
+- `movie context cache`: `24h to 7d`
+- `trend context cache`: `30m to 6h`
+- `candidate content cache`: `6h to 24h`
+- `final response cache`: `5m to 1h`
+- `reveal history`: persistent in database
+
+### Storage Split
+
+Recommended storage split:
+
+- `Redis` for movie context cache, trend cache, candidate content cache, and short-lived final response cache
+- `PostgreSQL` for reveal history, feedback events, analytics events, and durable user profile state
+
+### Cache and Novelty Principle
+
+The final engagement response should be selected as:
+
+`cached candidates + user reveal history + ranking/personalization`
+
+It should not be selected as:
+
+`one cached final answer per movie forever`
 
 Caching is required to control cost and latency.
 
