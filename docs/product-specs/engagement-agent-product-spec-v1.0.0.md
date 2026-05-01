@@ -11,11 +11,13 @@
 
 The `Engagement Agent` is a lightweight AI-powered feature for the Cortex Cinema mobile app. Its purpose is to increase user interest in a movie by showing short, compelling content on the movie detail page.
 
-For each movie, the feature generates three content blocks:
+For each movie, the feature generates three primary content blocks:
 
-- `Fun Fact`
-- `Hook`
+- `Teaser Question`
+- `Fun Fact Answer`
 - `Why Watch This Now`
+
+An optional `Hook` may also be generated when the UI has room for an additional short watch-intent line.
 
 This experience should help movies feel more exciting, more relevant, and easier to choose without requiring the user to enter a chat flow.
 
@@ -74,20 +76,20 @@ Version `v1.0.0` does not include:
 
 ## User Stories
 
-- As a user browsing a movie, I want to see an interesting fact so the movie feels more memorable.
-- As a user deciding whether to watch, I want a short hook so I can quickly understand why the movie might be exciting.
+- As a user browsing a movie, I want to see a curiosity-driven question so I feel motivated to tap and learn more.
+- As a user browsing a movie, I want the revealed answer to feel interesting and memorable.
 - As a returning user, I want the app to explain why a movie fits my taste so recommendations feel more personal.
 - As a new user, I still want useful and engaging content even if the app knows little about me.
 
 ## Core Experience
 
-On the movie detail page, the app displays three short engagement cards:
+On the movie detail page, the app displays a curiosity-first engagement experience:
 
-- `Did you know?`
-- `Why it’s worth watching`
+- `Do you know why this film is famous?`
+- `Tap to reveal`
 - `Why it matches your taste`
 
-Each card should be concise, scannable, and spoiler-safe.
+The question should appear first. The answer should be revealed after user interaction. All content should remain concise, scannable, and spoiler-safe.
 
 ## Feature Scope
 
@@ -113,9 +115,13 @@ Each card should be concise, scannable, and spoiler-safe.
 
 For each movie detail request, the system must provide:
 
-- one `Fun Fact`
-- one `Hook`
+- one `Teaser Question`
+- one `Fun Fact Answer`
 - one `Why Watch This Now`
+
+The system may also provide:
+
+- one optional `Hook`
 
 ### Content Requirements
 
@@ -132,20 +138,27 @@ For each movie detail request, the system must provide:
 - response format is consistent
 - fallback content is available if generation fails
 - content avoids fabricated specific claims not supported by available data
+- the system should avoid showing the same `Fun Fact Answer` to the same user if it was already revealed before, when alternative content is available
 
 ## Content Definitions
 
-### Fun Fact
+### Teaser Question
 
-An interesting, fact-style insight about the movie, cast, director, genre, scale, or cultural and acclaim context.
+A curiosity-driven question shown before reveal. Its job is to attract attention and encourage the user to tap.
+
+The question should hint at cultural relevance, cast interest, production scale, acclaim, or trend momentum without immediately giving away the answer.
+
+### Fun Fact Answer
+
+An interesting, fact-style answer revealed after the user taps the teaser question.
 
 For `v1.0.0`, this may be closer to an `interesting insight` than deep verified trivia.
 
-When available, the system may enrich `Fun Fact` generation with approved external content such as publisher pages, interviews, public movie coverage, or high-signal social discussions. External content should be treated as enrichment input, not as automatically trusted fact.
+When available, the system may enrich `Fun Fact Answer` generation with approved external content such as publisher pages, interviews, public movie coverage, or high-signal social discussions. External content should be treated as enrichment input, not as automatically trusted fact.
 
 ### Hook
 
-A short, curiosity-driven line that makes the movie feel exciting or emotionally appealing.
+A short, optional line that makes the movie feel exciting or emotionally appealing after or alongside the reveal.
 
 ### Why Watch This Now
 
@@ -191,7 +204,7 @@ Example:
 ### Source Rules
 
 - TMDB remains the default structured source for every title
-- external web and social sources are optional enrichment for `Fun Fact` only in `v1.0.0`
+- external web and social sources are optional enrichment for `Fun Fact Answer` only in `v1.0.0`
 - source allowlists should be used for web scraping targets
 - social content should be used for trend, buzz, or interesting angles, not as sole proof of factual claims
 - unsupported or conflicting external claims must be dropped rather than generated
@@ -222,6 +235,7 @@ Example:
 - genre preferences
 - actor or director affinity inferred from behavior
 - completion or watch activity where available
+- revealed teaser-question and fun-fact-answer history per user
 
 ## Experience Rules
 
@@ -231,6 +245,8 @@ Example:
 - content should be easy to scan
 - the experience should feel like enhancement, not interruption
 - no chat UI in `v1.0.0`
+- the teaser question should appear before the answer
+- the answer should be revealed only after tap
 
 ### Safety Rules
 
@@ -269,11 +285,12 @@ Example:
 Version `v1.0.0` is successful when:
 
 - users see three engagement cards on movie detail pages
-- cards render consistently for supported titles
+- the teaser question and answer reveal pattern renders consistently for supported titles
 - content is concise and spoiler-safe
 - personalized `Why Watch This Now` appears when sufficient user data exists
 - generic fallback appears when it does not
 - the system captures basic feedback and usage analytics
+- the system avoids repeating previously revealed fun-fact answers to the same user when reasonable alternatives exist
 - latency is acceptable for a mobile detail page experience
 - the product team can measure impact on watch-intent actions
 
@@ -283,6 +300,8 @@ Version `v1.0.0` is successful when:
 - scraped web content may be noisy, duplicated, or unreliable
 - social media content may be inaccurate, hype-driven, or manipulative
 - LLM output may become repetitive across titles
+- teaser questions may feel clickbait-like if not written carefully
+- repeated fun-fact answers may reduce perceived intelligence and novelty
 - hallucinated facts may reduce trust
 - cold-start users may receive weaker copy
 - generation latency may hurt detail page experience
@@ -290,12 +309,13 @@ Version `v1.0.0` is successful when:
 
 ## Risk Mitigation
 
-- frame `Fun Fact` as insight-style content, not guaranteed deep trivia
+- frame `Fun Fact Answer` as insight-style content, not guaranteed deep trivia
 - use strict prompting and output validation
 - prefer broad, safe claims over risky specifics
 - use approved source allowlists and source quality scoring
 - treat social content as inspiration or trend signal unless independently supported
 - cache generated content where practical
+- track per-user reveal history and prefer unseen alternatives
 - use generic fallbacks for low-confidence cases
 - measure quality through feedback and conversion
 
@@ -315,7 +335,7 @@ Improve fact richness and copy diversity based on results.
 
 ### Phase 4
 
-Add approved web scraping and social enrichment for higher-quality `Fun Fact` generation with source filtering, extraction, and trust controls.
+Add approved web scraping and social enrichment for higher-quality `Fun Fact Answer` generation with source filtering, extraction, and trust controls.
 
 ## Release Recommendation
 

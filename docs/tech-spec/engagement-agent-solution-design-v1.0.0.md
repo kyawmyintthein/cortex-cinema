@@ -10,11 +10,13 @@
 
 ## Overview
 
-This document defines the technical solution for `Engagement Agent v1.0.0`, based on the product spec. The goal is to deliver a lightweight backend-driven AI experience that generates three short engagement snippets on a movie detail page:
+This document defines the technical solution for `Engagement Agent v1.0.0`, based on the product spec. The goal is to deliver a lightweight backend-driven AI experience that generates a curiosity-first engagement experience on a movie detail page:
 
-- `Fun Fact`
-- `Hook`
+- `Teaser Question`
+- `Fun Fact Answer`
 - `Why Watch This Now`
+
+An optional `Hook` may also be generated when the UI supports it.
 
 The design favors:
 
@@ -27,9 +29,10 @@ The design favors:
 
 ## Goals
 
-- Serve three engagement snippets for a movie detail page request
+- Serve teaser-question reveal content for a movie detail page request
 - Personalize `Why Watch This Now` when user context is available
 - Support optional fun-fact enrichment from approved web and social sources
+- Avoid repeating the same revealed fun-fact answer for the same user when reasonable alternatives exist
 - Prevent unsupported or fabricated factual claims
 - Keep the system observable, cacheable, and easy to iterate
 
@@ -67,8 +70,8 @@ flowchart LR
     E["User Activity / Profile Service"]
     F["Trend Agent"]
 
-    G["Hook Generator Tool (LLM)"]
-    H["Fun Fact Generator Tool (LLM)"]
+    G["Teaser Question Generator Tool (LLM)"]
+    H["Fun Fact Answer Generator Tool (LLM)"]
     I["Why Watch Generator Tool (LLM)"]
 
     J["Response Composer"]
@@ -103,15 +106,18 @@ flowchart LR
 3. The backend gateway forwards the request to the `Orchestrator Agent (Brain)`.
 4. The orchestrator calls `Movie Context Tool`, which retrieves normalized movie metadata from `TMDB API`.
 5. The orchestrator calls `User Activity / Profile Service`, which retrieves user taste signals from the `User DB / Events Store`.
-6. The orchestrator optionally invokes `Trend Agent`, which gathers external momentum or buzz signals from `Reddit / X / News APIs`.
-7. The orchestrator sends the right context to three specialized generation tools:
-8. `Hook Generator Tool (LLM)` generates the hook.
-9. `Fun Fact Generator Tool (LLM)` generates the fun fact.
-10. `Why Watch Generator Tool (LLM)` generates the personalized or fallback watch reason.
-11. The orchestrator sends all outputs to the `Response Composer`.
-12. The response composer validates, assembles, and stores the final response in `Cache`.
-13. The `Engagement API (Backend Gateway)` returns the composed response to the mobile client.
-14. Request, feedback, and downstream engagement events are sent to `Analytics / Feedback`.
+6. The user profile service also provides reveal history for previously seen teaser-question and fun-fact-answer pairs when available.
+7. The orchestrator optionally invokes `Trend Agent`, which gathers external momentum or buzz signals from `Reddit / X / News APIs`.
+8. The orchestrator sends the right context to the specialized generation tools.
+9. `Teaser Question Generator Tool (LLM)` generates the teaser question.
+10. `Fun Fact Answer Generator Tool (LLM)` generates the reveal answer.
+11. `Why Watch Generator Tool (LLM)` generates the personalized or fallback watch reason.
+12. The orchestrator may also request an optional hook when the client experience supports it.
+13. The orchestrator sends all outputs to the `Response Composer`.
+14. The response composer filters or rejects already-seen answer variants when user reveal history is available.
+15. The response composer validates, assembles, and stores the final response in `Cache`.
+16. The `Engagement API (Backend Gateway)` returns the composed response to the mobile client.
+17. Request, feedback, reveal-click, and downstream engagement events are sent to `Analytics / Feedback`.
 
 ## Agent Design
 
@@ -155,6 +161,7 @@ Responsibilities:
 - transform raw user activity into a compact model-friendly summary
 - assign personalization confidence tier
 - avoid leaking raw activity data to the LLM
+- return previously revealed teaser-question and fun-fact-answer history when available
 
 Suggested output:
 
@@ -164,7 +171,8 @@ Suggested output:
   "favoriteActors": ["Zendaya"],
   "recentThemes": ["space", "mystery"],
   "preferredPacing": "slow-burn",
-  "personalizationConfidence": "medium"
+  "personalizationConfidence": "medium",
+  "revealedFactIds": ["fact_001", "fact_014"]
 }
 ```
 
@@ -184,19 +192,19 @@ Design rules:
 - news coverage may be used for cultural relevance, release momentum, or discussion spikes
 - unsupported or conflicting claims are dropped
 
-### 5. Hook Generator Tool (LLM)
+### 5. Teaser Question Generator Tool (LLM)
 
 Responsibilities:
 
-- generate a concise curiosity-driven hook
+- generate a concise curiosity-driven question
 - use movie context and optional trend context
-- avoid spoilers and repetitive generic phrasing
+- avoid spoilers, misleading clickbait, and repetitive generic phrasing
 
-### 6. Fun Fact Generator Tool (LLM)
+### 6. Fun Fact Answer Generator Tool (LLM)
 
 Responsibilities:
 
-- generate a safe `Fun Fact`
+- generate a safe `Fun Fact Answer`
 - use movie context as the default input
 - optionally use trend context when source quality is acceptable
 - avoid unsupported specific claims
@@ -209,16 +217,26 @@ Responsibilities:
 - combine movie context with user profile signals
 - degrade gracefully when personalization confidence is low
 
-### 8. Response Composer
+### 8. Hook Generator Tool (LLM)
+
+Responsibilities:
+
+- generate an optional hook line when requested
+- reinforce excitement after the reveal interaction
+- avoid duplicating the teaser question or answer
+
+### 9. Response Composer
 
 Responsibilities:
 
 - combine generator outputs into the final response payload
 - validate structure, safety, and fallback rules
-- set metadata such as `personalized`, `trendUsed`, and `fallbackUsed`
+- set metadata such as `personalized`, `trendUsed`, `fallbackUsed`, and `hookIncluded`
+- check generated fact identity against user reveal history when available
+- prefer unseen fact variants before returning the response
 - prepare the payload for caching and API return
 
-### 9. Trend Source Layer
+### 10. Trend Source Layer
 
 Responsibilities:
 
@@ -275,7 +293,8 @@ Suggested output:
     "favoriteActors": ["Actor A"],
     "recentThemes": ["space"],
     "preferredPacing": "slow-burn",
-    "personalizationConfidence": "medium"
+    "personalizationConfidence": "medium",
+    "revealedFactIds": ["fact_001"]
   },
   "trendSummary": {
     "enabled": true,
@@ -296,14 +315,16 @@ Suggested output:
 {
   "movieId": 550,
   "engagement": {
-    "funFact": "This film stands out for pairing large-scale spectacle with strong character focus.",
-    "hook": "A visually ambitious story that balances scale with emotional tension.",
+    "teaserQuestion": "Do you know why this film became such a big cultural talking point?",
+    "funFactAnswer": "It stood out for combining large-scale spectacle with a story that audiences kept discussing long after watching.",
     "whyWatchNow": "You have been leaning into cerebral sci-fi lately, and this fits that mood."
   },
   "metadata": {
     "personalized": true,
     "fallbackUsed": false,
     "trendUsed": true,
+    "hookIncluded": false,
+    "factId": "fact_021",
     "version": "v1.0.0"
   }
 }
@@ -318,9 +339,12 @@ The orchestrator should manage a narrow shared state object:
   "movie": {},
   "userSummary": {},
   "trendSummary": {},
-  "hook": "",
-  "funFact": "",
+  "revealedFactIds": [],
+  "teaserQuestion": "",
+  "funFactAnswer": "",
   "whyWatchNow": "",
+  "hook": "",
+  "factId": "",
   "composedResponse": {},
   "validation": {
     "fallbackUsed": false
@@ -346,9 +370,10 @@ This keeps the agent flow observable and aligns with a graph-based execution mod
 You generate spoiler-safe engagement copy for a movie mobile app.
 
 Return valid JSON with:
-- funFact
-- hook
+- teaserQuestion
+- funFactAnswer
 - whyWatchNow
+- optionalHook
 
 Rules:
 - Keep each field short and mobile-friendly.
@@ -356,6 +381,9 @@ Rules:
 - Do not invent unsupported specific claims.
 - Use trend context only when the source summary is credible.
 - Use user context only when provided and avoid overly specific behavior references.
+- Make the teaser question intriguing but not misleading.
+- Make the answer feel rewarding after the reveal.
+- When possible, avoid generating the same answer variant already revealed to this user.
 ```
 
 ## Fallback Strategy
@@ -363,15 +391,16 @@ Rules:
 Fallback priority:
 
 1. cached generic movie engagement
-2. template-driven generation from TMDB metadata only
-3. static safe generic copy
+2. alternate unseen fact variant for this user
+3. template-driven generation from TMDB metadata only
+4. static safe generic copy
 
 Example fallback:
 
 ```json
 {
-  "funFact": "A widely discussed title known for its strong style and audience appeal.",
-  "hook": "A polished pick with a memorable tone.",
+  "teaserQuestion": "Do you know why this movie stayed in the conversation for so long?",
+  "funFactAnswer": "It earned attention for its distinctive style and the way audiences kept talking about it afterward.",
   "whyWatchNow": "A strong choice if you want something engaging tonight."
 }
 ```
@@ -393,10 +422,22 @@ Trend context should be optional and additive.
 
 Rules:
 
-- use trend context mainly for `funFact` and `hook`
+- use trend context mainly for `teaserQuestion`, `funFactAnswer`, and optional `hook`
 - do not require trend context to produce an answer
 - avoid turning short-lived hype into hard factual claims
 - prefer concise trend framing such as buzz, momentum, or discussion themes
+
+## Repeat Avoidance Strategy
+
+The system should treat previously revealed fun-fact answers as a user-specific novelty constraint.
+
+Rules:
+
+- store a stable `factId` or normalized answer fingerprint for each revealed answer
+- prefer unseen fact variants for the same movie and user
+- if no unseen variant exists, the system may reuse the best available answer
+- do not block the entire engagement response just because novelty is exhausted
+- track reveal events only after the user actually taps to reveal the answer
 
 ## Trend Enrichment Pipeline Design
 
@@ -449,13 +490,14 @@ Caching is required to control cost and latency.
 Recommended cache keys:
 
 - `movieId + version` for generic content
-- `movieId + userSegment + trendSegment + version` for trend-aware personalization
+- `movieId + userSegment + trendSegment + noveltySegment + version` for trend-aware personalization
 
 Recommended behavior:
 
 - pre-generate popular movie generic content
 - cache generic outputs longer than personalized outputs
 - cache trend-aware outputs more briefly than generic outputs
+- keep user-specific reveal history separate from generic cache entries
 - invalidate when prompt version or source policy changes
 
 ## Observability
@@ -466,14 +508,17 @@ Track:
 - movie context fetch latency
 - user profile fetch latency
 - trend enrichment latency
-- hook generation latency
-- fun fact generation latency
+- teaser question generation latency
+- fun fact answer generation latency
 - why watch generation latency
+- optional hook generation latency
 - response composition latency
 - cache hit rate
 - validation failure rate
 - fallback rate
 - trend enrichment usage rate
+- teaser reveal click-through rate
+- repeated-answer avoidance hit rate
 - feedback events
 - downstream conversion events
 
@@ -487,6 +532,7 @@ Failure scenarios:
 - trend agent failure
 - LLM timeout
 - invalid LLM output
+- no unseen fact variant available
 
 Handling rules:
 
@@ -495,6 +541,7 @@ Handling rules:
 - trend source failure should not fail the request
 - trend agent failure should drop trend context and continue
 - LLM failure should trigger fallback generation
+- no unseen fact variant available should allow reuse of the best available safe answer
 
 ## Security and Safety
 
@@ -503,16 +550,18 @@ Handling rules:
 - do not treat social buzz as verified production truth
 - enforce source allowlists for scraping
 - apply content moderation and blocked-pattern checks before serving output
+- store only minimal reveal-history identifiers needed for repeat avoidance
 
 ## API Evolution Notes
 
-Version `v1.0.0` should keep a narrow contract focused on snippets. Future versions may add:
+Version `v1.0.0` should keep a narrow contract focused on reveal-style engagement snippets. Future versions may add:
 
 - source attribution metadata
 - explanation tags such as `cast`, `acclaim`, or `trend`
 - locale-aware generation
 - richer user taste segmentation
 - more explicit trend freshness metadata
+- stronger per-user novelty rotation policies
 
 ## Rollout Plan
 
@@ -541,4 +590,4 @@ These should be adopted only as implementation begins.
 
 ## Summary
 
-`Engagement Agent v1.0.0` should be implemented as a bounded agentic workflow centered on an `Orchestrator Agent (Brain)`. The orchestrator should use `Movie Context Tool`, `User Activity / Profile Service`, an optional `Trend Agent`, specialized LLM generator tools, and a `Response Composer` to produce the final engagement payload. This keeps the MVP practical to ship while making the top-level design clearly agentic and extensible.
+`Engagement Agent v1.0.0` should be implemented as a bounded agentic workflow centered on an `Orchestrator Agent (Brain)`. The orchestrator should use `Movie Context Tool`, `User Activity / Profile Service`, an optional `Trend Agent`, specialized generators for teaser question and reveal answer, and a `Response Composer` to produce the final engagement payload. This keeps the MVP practical to ship while making the top-level design clearly agentic and extensible.
