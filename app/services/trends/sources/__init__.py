@@ -1,0 +1,1 @@
+"""Approved trend source adapters."""
